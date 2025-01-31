@@ -5,8 +5,8 @@ from django.db import models
 class QuestionBank(models.Model):
     question_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     question = models.JSONField()
-    topic = models.CharField(max_length=255, db_index=True)
-    difficulty = models.PositiveSmallIntegerField()
+    topic = models.CharField(max_length=255, db_index=True, blank=True, null=True)
+    difficulty = models.PositiveSmallIntegerField(blank=True, null=True)
     school = models.CharField(max_length=255, blank=True, null=True)
     others = models.TextField(blank=True, null=True)
     question_image_base64 = models.TextField(blank=True, null=True)
