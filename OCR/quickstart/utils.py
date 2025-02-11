@@ -1,5 +1,6 @@
 import base64
 import easyocr
+from openai import OpenAI
 
 # option_index = {0:"A",1:"B",2:"C",3:"D"}
 option_index = ["A","B","C","D"]
@@ -20,7 +21,8 @@ def convertBase64ToImg(base64string):
     except Exception as e:
         return None
 
-def performOCR(img):
+##functions using easyOCR
+def easyOCR(img):
     reader = easyocr.Reader(['en'])
     try:
         extracted_text = reader.readtext(img)  # Perform OCR
@@ -47,3 +49,23 @@ def processData(extracted_text, type):
             return processed_text
     except Exception as e:
         return {"error": f"An unexpected error occurred: {str(e)}"}
+    
+def passDataThroughOpenAPI():
+    # Extract only the text
+    try:
+        client = OpenAI(
+        api_key="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"
+        )
+
+        completion = client.chat.completions.create(
+        model="gpt-4o-mini",
+        store=True,
+        messages=[
+            {"role": "user", "content": "write a haiku about ai"}
+        ]
+        )
+        print(completion.choices[0].message);    
+        return completion
+    except Exception as e:
+        return {"error": f"An unexpected error occurred: {str(e)}"}
+

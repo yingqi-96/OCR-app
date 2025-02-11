@@ -1,6 +1,6 @@
 from django.contrib.auth.models import Group, User
 from rest_framework import serializers
-from .models import QuestionBank
+from .models import QuestionBank, LabelOptions
 
 
 class UserSerializer(serializers.HyperlinkedModelSerializer):
@@ -19,7 +19,12 @@ class QuestionBankSerializer(serializers.ModelSerializer):
         model = QuestionBank
         fields = '__all__'  # Serialize all fields of the model
 
+class LabelOptionsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LabelOptions
+        fields = '__all__'  # Serialize all fields of the model
+
 class FileUploadSerializer(serializers.Serializer):
-    question = serializers.FileField()
-    options = serializers.FileField()
+    question = serializers.FileField(required=False, allow_null=True)
+    options = serializers.FileField(required=False, allow_null=True)
     

@@ -17,13 +17,16 @@ Including another URLconf
 from django.urls import include, path
 from rest_framework import routers
 from tutorial.quickstart import views
-from quickstart.views import UploadImage, QuestionBankView
+from quickstart.views import UploadImageAndProcessWithEasyOCR, ProcessData, QuestionBankView, LabelOptionsView
 
 router = routers.DefaultRouter()
 router.register(r'users', views.UserViewSet)
 router.register(r'groups', views.GroupViewSet)
-router.register(r'upload', UploadImage, basename="upload")
-router.register(r'questionbank', QuestionBankView, basename="questionbank")
+router.register(r'upload-and-process-with-easyOCR', UploadImageAndProcessWithEasyOCR, basename="upload-and-process-with-easyOCR")
+router.register(r'upload-and-process-with-LLM', ProcessData, basename="upload-and-process-with-LLM")
+router.register(r'question-bank', QuestionBankView, basename="question-bank")
+router.register(r'label-options', LabelOptionsView, basename="label-options")
+
 
 # Wire up our API using automatic URL routing.
 # Additionally, we include login URLs for the browsable API.

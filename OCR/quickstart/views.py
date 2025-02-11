@@ -3,9 +3,9 @@ from rest_framework import permissions, viewsets
 from rest_framework import status
 from rest_framework.response import Response
 
-from .serializers import GroupSerializer, UserSerializer, QuestionBankSerializer, FileUploadSerializer 
-from .utils import performOCR, processData, convertImgToBase64
-from .models import QuestionBank
+from .serializers import GroupSerializer, UserSerializer, QuestionBankSerializer, LabelOptionsSerializer, FileUploadSerializer 
+from .utils import easyOCR, processData, convertImgToBase64, passDataThroughOpenAPI
+from .models import QuestionBank, LabelOptions
 
 class UserViewSet(viewsets.ModelViewSet):
     """
@@ -24,7 +24,7 @@ class GroupViewSet(viewsets.ModelViewSet):
     serializer_class = GroupSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-class UploadImage(viewsets.ViewSet):
+class UploadImageAndProcessWithEasyOCR(viewsets.ViewSet):
     serializer_class = FileUploadSerializer
 
     def list(self, request):
@@ -37,23 +37,33 @@ class UploadImage(viewsets.ViewSet):
     
     def post(self, request):
         serializer = FileUploadSerializer(data=request.data)
-        
+
+        # Initialize variables for the extracted question and options
+        extracted_question = None
+        extracted_options = None
+        processed_question = None
+        processed_options = None
+        question_base64 = None
+        options_base64 = None
+        new_question_serialised = QuestionBankSerializer()
+
         if serializer.is_valid():
             uploaded_question =  serializer.validated_data['question']
             uploaded_options =  serializer.validated_data['options']
 
-            if not uploaded_question or not uploaded_options:
+            if not uploaded_question and not uploaded_options:
                 return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
-
+            
+            if not uploaded_question.content_type.startswith("image/") and not uploaded_options.content_type.startswith("image/"):
+                return Response({"error": "Unsupported file type"}, status=status.HTTP_400_BAD_REQUEST)
+            
             # Process image files
-            if uploaded_question.content_type.startswith("image/") and uploaded_options.content_type.startswith("image/"):
+            if uploaded_question is not None:
                 question = uploaded_question.read()
-                options = uploaded_options.read()
                 question_base64= convertImgToBase64(question)
-                options_base64= convertImgToBase64(options)
 
                 # Convert file content to an image format easyOCR can process
-                extracted_question = performOCR(question)
+                extracted_question = easyOCR(question)
                  # Check if the function returned an error
                 if isinstance(extracted_question, dict) and "error" in extracted_question:
                     return Response(extracted_question, status=status.HTTP_400_BAD_REQUEST)
@@ -62,8 +72,13 @@ class UploadImage(viewsets.ViewSet):
                 if isinstance(processed_question, dict) and "error" in processed_question:
                     return Response(processed_question, status=status.HTTP_400_BAD_REQUEST)
 
+            # Process image files
+            if uploaded_options is not None:
+                options = uploaded_options.read()
+                options_base64= convertImgToBase64(options)
+
                 # Convert file content to an image format easyOCR can process
-                extracted_options = performOCR(options)
+                extracted_options = easyOCR(options)
                  # Check if the function returned an error
                 if isinstance(extracted_options, dict) and "error" in extracted_options:
                     return Response(extracted_options, status=status.HTTP_400_BAD_REQUEST)
@@ -71,8 +86,6 @@ class UploadImage(viewsets.ViewSet):
                 processed_options = processData(extracted_options, "options")
                 if isinstance(processed_options, dict) and "error" in processed_options:
                     return Response(processed_options, status=status.HTTP_400_BAD_REQUEST)
-            else:
-                return Response({"error": "Unsupported file type"}, status=status.HTTP_400_BAD_REQUEST)
             
             # Add processed_text into db
             try: 
@@ -98,21 +111,59 @@ class UploadImage(viewsets.ViewSet):
             "new_question": new_question_serialised.data
         }, status=status.HTTP_201_CREATED)
 
+class ProcessData(viewsets.ViewSet):
+    def list(self, request):
+        return Response("GET")
+
+    def post(self, request):
+        # Add processed_text into db
+        try: 
+            chat = passDataThroughOpenAPI()        
+        except Exception as e:
+            return Response({"error": f"An unexpected error occurred: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Return structured JSON response
+        return Response(status=status.HTTP_201_CREATED)
+
 class QuestionBankView(viewsets.ViewSet):
     serializer_class = QuestionBankSerializer
 
     def list(self, request):
-        # Fetch all QuestionBank objects, ordered by created_at
-        queryset = QuestionBank.objects.all().order_by('created_at')
+        filter_params = request.query_params.dict() # Convert QueryDict to a regular dictionary
+
+        # Convert known integer fields to integers
+        if "difficulty" in filter_params:
+            try:
+                filter_params["difficulty"] = int(filter_params["difficulty"])
+            except ValueError:
+                return Response({"error": "Invalid difficulty value"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if filter_params:  
+            queryset = QuestionBank.objects.filter(**filter_params)  # Apply filtering
+        else:
+            # Fetch all QuestionBank objects, ordered by created_at
+            queryset = QuestionBank.objects.all().order_by('created_at')
         # Serialize the queryset using the QuestionBankSerializer
         serializer = QuestionBankSerializer(queryset, many=True)
         # Return the serialized data in the response
-        return Response(serializer.data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
     
+    def post(self, request):
+        serializer = QuestionBankSerializer(data=request.data)
+
+        if serializer.is_valid():
+            # Save the updated data
+            serializer.save()
+            # Return the updated object as the response
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            # If validation fails, return an error response with details
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
     def put(self, request, pk=None):
             try:
                 # Retrieve the question by its primary key (id)
-                question = QuestionBank.objects.get(pk=pk)
+                question = QuestionBank.objects.get(question_id=request.data.get('question_id'))
             except QuestionBank.DoesNotExist:
                 return Response({"error": "Question not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -128,6 +179,70 @@ class QuestionBankView(viewsets.ViewSet):
             else:
                 # If validation fails, return an error response with details
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+    def destroy(self, request, pk=None):
+        try:
+            question = QuestionBank.objects.get(question_id=pk)
+            question.delete()
+            return Response({"message": "Question deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+        except QuestionBank.DoesNotExist:
+            return Response({"error": "Question not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+class LabelOptionsView(viewsets.ViewSet):
+    serializer_class = LabelOptionsSerializer
+
+    def list(self, request):
+        filter_params = request.query_params.dict() # Convert QueryDict to a regular dictionary
+
+        if filter_params:  
+            queryset = LabelOptions.objects.filter(**filter_params)  # Apply filtering
+        else:
+            # Fetch all QuestionBank objects, ordered by created_at
+            queryset = LabelOptions.objects.all().order_by('created_at')
+        # Serialize the queryset using the QuestionBankSerializer
+        serializer = LabelOptionsSerializer(queryset, many=True)
+        # Return the serialized data in the response
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def post(self, request):
+        serializer = LabelOptionsSerializer(data=request.data)
+
+        if serializer.is_valid():
+            # Save the updated data
+            serializer.save()
+            # Return the updated object as the response
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            # If validation fails, return an error response with details
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request, pk=None):
+            try:
+                # Retrieve the question by its primary key (id)
+                label_option = LabelOptions.objects.get(label_id=request.data.get('label_id'))
+            except LabelOptions.DoesNotExist:
+                return Response({"error": "Label Option not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            # Serialize the incoming data to validate it (you can use partial=True for partial updates)
+            serializer = LabelOptionsSerializer(label_option, data=request.data, partial=True)
+
+            if serializer.is_valid():
+                # Save the updated data
+                serializer.save()
+
+                # Return the updated object as the response
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            else:
+                # If validation fails, return an error response with details
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+    def destroy(self, request, pk=None):
+        try:
+            label_option = LabelOptions.objects.get(label_id=pk)
+            label_option.delete()
+            return Response({"message": "Label Option deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+        except LabelOptions.DoesNotExist:
+            return Response({"error": "Label Option not found"}, status=status.HTTP_404_NOT_FOUND)
         
 
 #   class UploadImage(ViewSet):
