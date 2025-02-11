@@ -25,6 +25,8 @@ class LabelOptionsSerializer(serializers.ModelSerializer):
         fields = '__all__'  # Serialize all fields of the model
 
 class FileUploadSerializer(serializers.Serializer):
+    file = serializers.FileField(required=False, allow_null=True)
+
+class ImageUploadSerializer(serializers.Serializer):
     question = serializers.FileField(required=False, allow_null=True)
     options = serializers.FileField(required=False, allow_null=True)
-    
