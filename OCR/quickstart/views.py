@@ -1,4 +1,5 @@
 import os 
+import datetime
 from django.conf import settings
 from django.contrib.auth.models import Group, User
 from rest_framework import permissions, viewsets
@@ -29,7 +30,6 @@ class GroupViewSet(viewsets.ModelViewSet):
 class UploadPDFView(viewsets.ViewSet):
     serializer_class = FileUploadSerializer
 
-
     def list(self, request):
         return Response("GET")
 
@@ -43,8 +43,57 @@ class UploadPDFView(viewsets.ViewSet):
                 return Response({"error": "Unsupported file type"}, status=status.HTTP_400_BAD_REQUEST)
            
             try: 
+                # Get the original filename and extension
+                filename, extension = os.path.splitext(uploaded_file.name)
+
+                # Append current timestamp to filename
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                new_filename = f"{filename}_{timestamp}{extension}"
+
                 # Set a custom file path (e.g., 'uploads/')
-                file_path = os.path.join(settings.MEDIA_ROOT, 'uploads', uploaded_file.name)
+                file_path = os.path.join(settings.MEDIA_ROOT, 'uploads', new_filename)
+                
+                # Ensure the target directory exists
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                
+                # Save the file to the desired location
+                with open(file_path, 'wb') as destination:
+                    for chunk in uploaded_file.chunks():
+                        destination.write(chunk)
+                
+                return Response({"message": "File uploaded successfully", "file_path": file_path}, status=status.HTTP_201_CREATED)
+            
+            except Exception as e:
+                return Response({"error": f"An unexpected error occurred: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class UploadImageView(viewsets.ViewSet):
+    serializer_class = FileUploadSerializer
+
+    def list(self, request):
+        return Response("GET")
+
+    def post(self, request):
+        serializer = FileUploadSerializer(data=request.data)
+
+        if serializer.is_valid():
+            uploaded_file = request.FILES['file']
+
+            if not uploaded_file.content_type.startswith("image/"):
+                return Response({"error": "Unsupported file type"}, status=status.HTTP_400_BAD_REQUEST)
+           
+            try: 
+                # Get the original filename and extension
+                filename, extension = os.path.splitext(uploaded_file.name)
+
+                # Append current timestamp to filename
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                new_filename = f"{filename}_{timestamp}{extension}"
+
+                # Set a custom file path (e.g., 'uploads/')
+                file_path = os.path.join(settings.MEDIA_ROOT, 'images', new_filename)
                 
                 # Ensure the target directory exists
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
