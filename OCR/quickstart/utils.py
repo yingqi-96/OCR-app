@@ -1,5 +1,4 @@
-import base64
-import easyocr
+import base64, easyocr, os, fitz
 from openai import OpenAI
 
 # option_index = {0:"A",1:"B",2:"C",3:"D"}
@@ -69,3 +68,17 @@ def passDataThroughOpenAPI():
     except Exception as e:
         return {"error": f"An unexpected error occurred: {str(e)}"}
 
+def convert_pdf_to_images(pdf_path, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+
+    doc = fitz.open(pdf_path)
+    image_paths = []
+
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)  # 0-based page index
+        pix = page.get_pixmap()
+        image_path = os.path.join(output_dir, f"page_{page_num + 1}.png")
+        pix.save(image_path)
+        image_paths.append(image_path)
+
+    return image_paths

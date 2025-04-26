@@ -5,9 +5,10 @@ from django.contrib.auth.models import Group, User
 from rest_framework import permissions, viewsets
 from rest_framework import status
 from rest_framework.response import Response
+from django.db.models import Q
 
 from .serializers import GroupSerializer, UserSerializer, QuestionBankSerializer, LabelOptionsSerializer, FileUploadSerializer, ImageUploadSerializer 
-from .utils import easyOCR, processData, convertImgToBase64, passDataThroughOpenAPI
+from .utils import easyOCR, processData, convertImgToBase64, passDataThroughOpenAPI, convert_pdf_to_images
 from .models import QuestionBank, LabelOptions
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -49,9 +50,11 @@ class UploadPDFView(viewsets.ViewSet):
                 # Append current timestamp to filename
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 new_filename = f"{filename}_{timestamp}{extension}"
+                image_filedir = f"{filename}_{timestamp}"
 
                 # Set a custom file path (e.g., 'uploads/')
                 file_path = os.path.join(settings.MEDIA_ROOT, 'uploads', new_filename)
+                image_file_path = os.path.join(settings.MEDIA_ROOT, 'uploads', image_filedir, 'raw')
                 
                 # Ensure the target directory exists
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -61,7 +64,9 @@ class UploadPDFView(viewsets.ViewSet):
                     for chunk in uploaded_file.chunks():
                         destination.write(chunk)
                 
-                return Response({"message": "File uploaded successfully", "file_path": file_path}, status=status.HTTP_201_CREATED)
+                converted_images = convert_pdf_to_images(file_path, image_file_path)
+
+                return Response({"message": "File uploaded successfully", "file_path": file_path, "image_file_path": image_file_path, "image_files": converted_images}, status=status.HTTP_201_CREATED)
             
             except Exception as e:
                 return Response({"error": f"An unexpected error occurred: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
@@ -218,23 +223,29 @@ class QuestionBankView(viewsets.ViewSet):
     serializer_class = QuestionBankSerializer
 
     def list(self, request):
-        filter_params = request.query_params.dict() # Convert QueryDict to a regular dictionary
+        filter_params = request.query_params.dict()  # Convert QueryDict to a regular dictionary
 
-        # Convert known integer fields to integers
-        if "difficulty" in filter_params:
-            try:
-                filter_params["difficulty"] = int(filter_params["difficulty"])
-            except ValueError:
-                return Response({"error": "Invalid difficulty value"}, status=status.HTTP_400_BAD_REQUEST)
+        # Initialize the base query (AND conditions)
+        query = Q()
 
-        if filter_params:  
-            queryset = QuestionBank.objects.filter(**filter_params)  # Apply filtering
-        else:
-            # Fetch all QuestionBank objects, ordered by created_at
-            queryset = QuestionBank.objects.all().order_by('created_at')
-        # Serialize the queryset using the QuestionBankSerializer
+        # Iterate through all the filters in the request
+        for key, value in filter_params.items():
+            # If the filter has multiple values, we need OR logic
+            if ',' in value:  # If the value contains commas (i.e., multiple values)
+                values = value.split(',')
+                or_query = Q()
+                for val in values:
+                    or_query |= Q(**{key: val})  # Apply OR for each value
+                query &= or_query  # Combine the OR condition with AND for other filters
+            else:
+                # Otherwise, it's a single value filter (AND logic)
+                query &= Q(**{key: value})
+
+        # Now filter based on the built query
+        queryset = QuestionBank.objects.filter(query)
+
+        # Serialize
         serializer = QuestionBankSerializer(queryset, many=True)
-        # Return the serialized data in the response
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     def post(self, request):
@@ -288,10 +299,31 @@ class LabelOptionsView(viewsets.ViewSet):
         else:
             # Fetch all QuestionBank objects, ordered by created_at
             queryset = LabelOptions.objects.all().order_by('created_at')
-        # Serialize the queryset using the QuestionBankSerializer
-        serializer = LabelOptionsSerializer(queryset, many=True)
-        # Return the serialized data in the response
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        # # Serialize the queryset using the QuestionBankSerializer
+        # serializer = LabelOptionsSerializer(queryset, many=True)
+        # # Return the serialized data in the response
+        # return Response(serializer.data, status=status.HTTP_200_OK)
+
+         # Group the queryset by 'type' field
+        grouped_options = {}
+        
+        for label_option in queryset:
+            label_type = label_option.type  # Grouping by 'type' field
+            if label_type not in grouped_options:
+                grouped_options[label_type] = []
+            grouped_options[label_type].append(label_option)
+
+        # Serialize each group of label options
+        grouped_data = []
+        for label_type, options in grouped_options.items():
+            serializer = LabelOptionsSerializer(options, many=True)
+            grouped_data.append({
+                "type": label_type,
+                "options": serializer.data
+            })
+
+        # Return the grouped data
+        return Response(grouped_data, status=status.HTTP_200_OK)
     
     def post(self, request):
         serializer = LabelOptionsSerializer(data=request.data)
